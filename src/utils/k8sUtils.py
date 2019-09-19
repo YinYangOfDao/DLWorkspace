@@ -9,6 +9,7 @@ from datetime import datetime
 from tzlocal import get_localzone
 import pytz
 
+import logging
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)),"../storage"))
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)),"../utils"))
@@ -28,6 +29,12 @@ import random
 import pycurl
 from StringIO import StringIO
 
+logger = logging.getLogger(__name__)
+
+def localize_time(date):
+    if type(date) == str:
+        date = datetime.strptime(date, "%Y-%m-%dT%H:%M:%SZ")
+    return pytz.utc.localize(date).isoformat()
 
 def curl_get(url):
     curl = pycurl.Curl()
@@ -53,7 +60,7 @@ def kubectl_create(jobfile, EXEC=True):
         try:
             output = subprocess32.check_output(["bash", "-c", config["kubelet-path"] + " create -f " + jobfile])
         except Exception as e:
-            print e
+            logger.exception("kubectl create")
             output = ""
     else:
         output = "Job " + jobfile + " is not submitted to kubernetes cluster"
@@ -64,10 +71,10 @@ def kubectl_delete(jobfile, EXEC=True):
     if EXEC:
         try:
             cmd = "bash -c '" + config["kubelet-path"] + " delete -f " + jobfile + "'"
-            print cmd
+            logger.info("executing %s", cmd)
             output = os.system(cmd)
         except Exception as e:
-            print e
+            logger.exception("kubectl delete")
             output = -1
     else:
         output = -1
@@ -83,7 +90,7 @@ def kubectl_exec(params, timeout=None):
         # TODO set the timeout
         output = subprocess32.check_output(["bash", "-c", config["kubelet-path"] + " " + params], timeout=timeout)
     except Exception as e:
-        print "EXCEPTION: " + str(e)
+        logger.exception("kubectl exec")
         output = ""
     return output
 
@@ -163,10 +170,10 @@ def GetServiceAddress(jobId):
 def GetPod(selector):
     podInfo = {}
     try:
-        output = kubectl_exec(" get pod -o yaml --show-all -l " + selector)
+        output = kubectl_exec(" get pod -o yaml -l " + selector)
         podInfo = yaml.load(output)
     except Exception as e:
-        print e
+        logger.exception("kubectl get pod")
         podInfo = None
     return podInfo
 
@@ -302,14 +309,14 @@ def get_pod_status(pod):
                 ret += ":\n" + containerStatus["state"]["terminated"]["message"]
             podstatus["message"] = ret
             if "finishedAt" in containerStatus["state"]["terminated"]:
-                podstatus["finishedAt"] = pytz.utc.localize(containerStatus["state"]["terminated"]["finishedAt"]).isoformat()
+                podstatus["finishedAt"] = localize_time(containerStatus["state"]["terminated"]["finishedAt"])
 
             if "startedAt" in containerStatus["state"]["terminated"]:
-                podstatus["startedAt"] = pytz.utc.localize(containerStatus["state"]["terminated"]["startedAt"]).isoformat()
+                podstatus["startedAt"] = localize_time(containerStatus["state"]["terminated"]["startedAt"])
         elif "state" in containerStatus and "running" in containerStatus["state"] and "startedAt" in containerStatus["state"]["running"]:
-            podstatus["message"] = "started at: " + pytz.utc.localize(containerStatus["state"]["running"]["startedAt"]).isoformat()
+            podstatus["message"] = "started at: " + localize_time(containerStatus["state"]["running"]["startedAt"])
             if "startedAt" in containerStatus["state"]["running"]:
-                podstatus["startedAt"] = pytz.utc.localize(containerStatus["state"]["running"]["startedAt"]).isoformat()
+                podstatus["startedAt"] = localize_time(containerStatus["state"]["running"]["startedAt"])
 
         if "finishedAt" not in podstatus:
             podstatus["finishedAt"] = datetime.now(get_localzone()).isoformat()
@@ -353,19 +360,6 @@ def GetJobStatus(jobId):
         detail = [get_pod_status(pod) for i, pod in enumerate(podInfo["items"])]
 
     return output, detail
-
-
-def all_pod_ready(job_id):
-    pods = GetPod("run=" + job_id)
-    print("\n\n\n--------------------------------------------\n\n")
-    print("=======%s" % pods)
-    if pods is None:
-        return False
-    if "items" in pods:
-        pod_status = [check_pod_status(pod) for pod in pods["items"]]
-        if any([status != "Running" for status in pod_status]):
-            return False
-    return True
 
 
 def get_node_labels(key):
