@@ -1112,6 +1112,28 @@ def UpdateVC(userName, vcName, quota, metadata):
     return ret
 
 
+def AddOrUpdateVC(user_name, quota_request):
+    """
+    proposed_quota is simplified, only has GPU/CPU count
+    """
+    ret = None
+    dataHandler = DataHandler()
+    if AuthorizationManager.IsClusterAdmin(user_name):
+        ret = dataHandler.AddOrUpdateVC(quota_request)
+        if ret is not None:
+            for vc, row in ret.items()
+                cacheItem = {"vcName": vc, "resourceQuota": row["res_quota"],
+                        "resourceMetadata": row["res_meta"]}
+                with vc_cache_lock:
+                    vc_cache[vc] = cacheItem
+        else:
+            ret = "Failed to Add or Update VC, VC quota not changed."
+    else:
+        ret = "Invalid Cluster Admin, Access Denied!"
+    dataHandler.Close()
+    return ret
+
+
 def GetEndpoints(userName, jobId):
     dataHandler = DataHandler()
     ret = []

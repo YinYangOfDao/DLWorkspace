@@ -9,6 +9,7 @@ import timeit
 import mysql.connector
 from prometheus_client import Histogram
 from vc_quota import vc_value_str
+from vc_quota import adequate_quota, compute_all_resource_by_gpu_or_cpu
 
 from config import config, global_vars
 
@@ -348,6 +349,7 @@ class DataHandler(object):
             logger.error('Exception: %s', str(e))
             return False
 
+    
     def init_vc_sqls(self, config):
         ratio_dict = {config['defalt_virtual_cluster_name']: 1.0}
         if "vc_resource_ratio" in config:
@@ -362,6 +364,7 @@ class DataHandler(object):
         for vc, vc_res_quota in res_quota.items():
             self.AddVC(vc, quota, metadata, vc_res_quota, res_meta)
 
+    
     @record
     def AddVC(self, vcName, quota, metadata, res_quota, res_meta):
         try:
@@ -375,6 +378,52 @@ class DataHandler(object):
         except Exception as e:
             logger.error('AddVC Exception: %s', str(e))
             return False
+
+    
+    def validate_quota_plan(self, quota_request, meta_dict, worker_sku_cnt):
+        all_quota_sql = f"SELECT vcName, resourceQuota FROM {self.vctablename}"
+        cursor = self.conn.cursor()
+        cursor.execute(all_quota_sql)
+        quota_res = cursor.fetchall()
+        all_vc_quotas = {json.loads(vc): json.loads(quota) for vc, quota in quota_res}
+        for vc, q_req in quota_request.items():
+            all_vc_quotas[vc] = q_req
+        valid = adequate_quota(all_vc_quotas, meta_dict, worker_sku_cnt)
+        return valid
+
+    
+    @record
+    def AddOrUpdateVC(self, quota_request):
+        '''quota_request: dict that map vc name to requested quota'''
+        try:
+            worker_sku_cnt = config["worker_sku_cnt"]
+            meta_sql = f"SELECT resourceQuota FROM {self.vctablename}"
+            cursor = self.conn.cursor()
+            cursor.execute(meta_sql)
+            meta_res = cursor.fetchone()
+            meta_dict = json.loads(meta_res[0])
+            valid = self.validate_quota_plan(quota_request, meta_dict, worker_sku_cnt)
+            if not valid:
+                logger.warning('Failed to Add or Update VCs\' Quota: would "\
+                    "exceed total resource amount.')
+                return None
+            res = compute_all_resource_by_gpu_or_cpu(all_vc_quotas, meta_dict, worker_sku_cnt)
+            for vc, row in res.items():
+                quota, metadata = row["quota"], row["meta"]
+                res_quota, res_meta = row["res_quota"], row["res_meta"]
+                sql = "INSERT INTO `{}` (vcName, quota, metadata, resourceQuota,"\
+                " resourceMetadata) VALUES ('{}', '{}', '{}', '{}', '{}') ON "\
+                "DUPLICATE KEY UPDATE resourceQuota = '{}', resourceMetadata = "\
+                "'{}'".format(self.vctablename, vcName, quota, metadata, \
+                    res_quota, res_meta, res_quota, res_meta)
+                cursor.execute(sql)
+            self.conn.commit()
+            cursor.close()
+            return res
+        except Exception as e:
+            logger.error('Add or Update VC Exception: %s', str(e))
+            return None
+
 
     @record
     def ListVCs(self):

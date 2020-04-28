@@ -11,6 +11,7 @@ import yaml
 import datetime
 import argparse
 import textwrap
+import requests
 import random
 from mysql import connector
 cwd = os.path.dirname(__file__)
@@ -33,7 +34,7 @@ from cloud_init_deploy import check_buildable_images, push_docker_images
 
 def load_config_4_ctl(args, command):
     # if we need to load all config
-    if command in ["svc", "render_template", "download", "docker", "db"]:
+    if command in ["svc", "render_template", "download", "docker", "db", "restful"]:
         args.config = [ENV_CNF_YAML, STATUS_YAML] if not args.config else args.config
         config = load_deploy_config(args)
     else:
@@ -354,6 +355,32 @@ def uncordon(config, args):
         run_kubectl(config, args, ["uncordon {}".format(node)])
 
 
+def restfulapi(config, args):
+    home_dir = str(Path.home())
+    dlts_admin_config_path = os.path.join(home_dir, ".dlts-admin.yaml")
+    dlts_admin_config_path = config.get(
+        "dlts_admin_config_path", dlts_admin_config_path)
+    if os.path.exists(dlts_admin_config_path):
+        with open(dlts_admin_config_path) as f:
+            email = yaml.safe_load(f)["email"]
+    else:
+        email = args.admin
+        assert email is not None and email, "specify email by"\
+        "--admin or in ~/.dlts-admin.yaml"
+    input_file_list = args.input if args.input else ["quota_plan.yaml"]
+    quota_request = add_configs_in_order(input_file_list, {})
+    nodes, _ = load_node_list_by_role_from_config(config, ["infra"])
+    master_node = random.choice(nodes)
+    api = f"https://{master_node}:{config['restfulapiport']}/AddOrUpdateVC"
+    payload = {"user": email, "quota_request": quota_request}
+    print(api, payload)
+    # r = requests.post(api, json=payload)
+    api = f"http://{master_node}:{config['restfulapiport']}/ListVCs?userName={email}"
+    print(api)
+    r = requests.get(api)
+    print("\nresponse:\n", r)
+
+
 def run_command(args, command):
     config = load_config_4_ctl(args, command)
     if command == "restorefromdir":
@@ -401,6 +428,8 @@ def run_command(args, command):
         cordon(config, args)
     elif command == "uncordon":
         uncordon(config, args)
+    elif command == "restful":
+        restfulapi(config, args)
     else:
         print("invalid command, please read the doc")
 

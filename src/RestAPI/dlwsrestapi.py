@@ -740,6 +740,21 @@ class UpdateVC(Resource):
         return generate_response(ret)
 
 
+@api.resource("/AddOrUpdateVC")
+class AddOrUpdateVC(Resource):
+    """
+    process user's request to add or update VC resource quota
+    """
+    def post(self):
+        params = request.get_json(force=True)
+        vc_quota_req = json.loads(params)
+        user_name = vc_quota_req["user"]
+        quota_request = vc_quota_req["quota_request"]
+        ret["result"] = JobRestAPIUtils.AddOrUpdateVC(user_name, quota_request)
+
+        return generate_response(ret)
+
+
 @api.resource("/ListStorages")
 class ListStorages(Resource):
     def __init__(self):

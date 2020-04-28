@@ -9,6 +9,8 @@ import math
 
 logger = logging.getLogger(__name__)
 
+BYTE_PER_UNIT = {"ki": 2**10, "mi": 2**20, "gi": 2**30, "ti": 2**40, 
+    "k":10**3, "m":10**6, "g": 10**9, "t": 10**12}
 
 def override(func):
     return func
@@ -56,6 +58,10 @@ def to_byte(data):
         return number * 10**18
     else:
         return number
+
+
+def from_byte(num, unit):
+    return str(math.floor(num/BYTE_PER_UNIT[unit.lower()])) + unit
 
 
 def mbyte(byte):
@@ -358,6 +364,10 @@ class Cpu(ResourceStat):
     def convert(self, data):
         return to_cpu(data)
 
+    def to_dict(self):
+        res_dict = {k: math.floor(v) for k, v in self.res.items()}
+        return res_dict
+
     @override
     def scalar(self, key):
         val = self.res.get(key)
@@ -371,6 +381,10 @@ class Memory(ResourceStat):
     def convert(self, data):
         return to_byte(data)
 
+    def to_dict(self):
+        res_dict = {k: from_byte(v, "Gi") for k, v in self.res.items()}
+        return res_dict
+
     @override
     def scalar(self, key):
         val = self.res.get(key)
@@ -381,13 +395,19 @@ class Memory(ResourceStat):
 
 @ResourceStat.register_subclass("gpu")
 class Gpu(ResourceStat):
-    pass
+    def to_dict(self):
+        res_dict = {k: math.floor(v) for k, v in self.res.items()}
+        return res_dict
 
 
 @ResourceStat.register_subclass("gpu_memory")
 class GpuMemory(ResourceStat):
     def convert(self, data):
         return to_byte(data)
+
+    def to_dict(self):
+        res_dict = {k: from_byte(v, "Gi") for k, v in self.res.items()}
+        return res_dict
 
     @override
     def scalar(self, key):
