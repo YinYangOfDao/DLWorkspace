@@ -81,6 +81,11 @@ class TestVCQuota(unittest.TestCase):
         for params, target in zip(params_ls, target_ls):
             self.assertEqual(vc_quota.adequate_quota(*params), target)
 
+        plan1 = {"platform": {"gpu": {"Standard_ND40s_v2": 10}}, "quantus": {"gpu_memory": {"Standard_ND40s_v2": "1440Gi"}, "memory": {"Standard_ND40s_v2": "7560Gi"}, "gpu": {"Standard_ND40s_v2": 90}, "cpu": {"Standard_ND40s_v2": 450}}}
+        meta1 = {"gpu_memory": {"Standard_B2s": {"per_node": "0Gi"}, "Standard_ND40s_v2": {"per_node": "128Gi"}}, "memory": {"Standard_B2s": {"per_node": "4Gi"}, "Standard_ND40s_v2": {"per_node": "672Gi", "schedulable_ratio": 0.95}}, "gpu": {"Standard_B2s": {"per_node": 0}, "Standard_ND40s_v2": {"gpu_type": "V100", "per_node": 8}}, "cpu": {"Standard_B2s": {"per_node": 2}, "Standard_ND40s_v2": {"per_node": 40, "schedulable_ratio": 0.95}}}
+        worker_sku_cnt1 = {"Standard_B2s": 1, "Standard_ND40s_v2": 20}
+        self.assertEqual(vc_quota.adequate_quota(plan1, meta1, worker_sku_cnt1), True)
+
    
 if __name__ == '__main__':
     logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s',

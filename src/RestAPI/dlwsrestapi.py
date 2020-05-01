@@ -750,6 +750,7 @@ class AddOrUpdateVC(Resource):
         vc_quota_req = json.loads(params)
         user_name = vc_quota_req["user"]
         quota_request = vc_quota_req["quota_request"]
+        ret = {}
         ret["result"] = JobRestAPIUtils.AddOrUpdateVC(user_name, quota_request)
 
         return generate_response(ret)

@@ -34,7 +34,7 @@ from cloud_init_deploy import check_buildable_images, push_docker_images
 
 def load_config_4_ctl(args, command):
     # if we need to load all config
-    if command in ["svc", "render_template", "download", "docker", "db", "restful"]:
+    if command in ["svc", "render_template", "download", "docker", "db", "admintool"]:
         args.config = [ENV_CNF_YAML, STATUS_YAML] if not args.config else args.config
         config = load_deploy_config(args)
     else:
@@ -309,7 +309,13 @@ def maintain_db(config, args):
             cols_filtered = [col for col in col_names if col not in cols_2_ignore]
             cols_str = ", ".join(cols_filtered)
             for row in table_config["rows"]:
-                vals = ", ".join(["'{}'".format(json.dumps(row[col])) for col in cols_filtered])
+                val_lst = []
+                for col in cols_filtered:
+                    if isinstance(row[col], str):
+                        val_lst.append("'{}'".format(row[col]))
+                    else:
+                        val_lst.append("'{}'".format(json.dumps(row[col])))
+                vals = ", ".join(val_lst)
                 vals = vals.replace("'null'", "NULL")
                 sql = "INSERT INTO `{}` ({}) VALUES ({})".format(table_name, cols_str, vals)
                 if args.verbose:
@@ -355,7 +361,7 @@ def uncordon(config, args):
         run_kubectl(config, args, ["uncordon {}".format(node)])
 
 
-def restfulapi(config, args):
+def admin_tool(config, args):
     home_dir = str(Path.home())
     dlts_admin_config_path = os.path.join(home_dir, ".dlts-admin.yaml")
     dlts_admin_config_path = config.get(
@@ -367,18 +373,20 @@ def restfulapi(config, args):
         email = args.admin
         assert email is not None and email, "specify email by"\
         "--admin or in ~/.dlts-admin.yaml"
-    input_file_list = args.input if args.input else ["quota_plan.yaml"]
-    quota_request = add_configs_in_order(input_file_list, {})
-    nodes, _ = load_node_list_by_role_from_config(config, ["infra"])
-    master_node = random.choice(nodes)
-    api = f"https://{master_node}:{config['restfulapiport']}/AddOrUpdateVC"
-    payload = {"user": email, "quota_request": quota_request}
-    print(api, payload)
-    # r = requests.post(api, json=payload)
-    api = f"http://{master_node}:{config['restfulapiport']}/ListVCs?userName={email}"
-    print(api)
-    r = requests.get(api)
-    print("\nresponse:\n", r)
+    subcommand = args.nargs[0]
+    if subcommand == "vc":
+        input_file_list = args.input if args.input else ["quota_plan.yaml"]
+        quota_request = add_configs_in_order(input_file_list, {})
+        nodes, _ = load_node_list_by_role_from_config(config, ["infra"])
+        print(nodes)
+        master_node = random.choice(nodes)
+        api = f"http://{master_node}:{config['restfulapiport']}/AddOrUpdateVC"
+        payload = json.dumps({"user": email, "quota_request": quota_request})
+        if args.verbose:
+            print(api, payload)
+        r = requests.post(api, json=payload)
+        if args.verbose:
+            print("\nresponse:\n", r)
 
 
 def run_command(args, command):
@@ -428,8 +436,8 @@ def run_command(args, command):
         cordon(config, args)
     elif command == "uncordon":
         uncordon(config, args)
-    elif command == "restful":
-        restfulapi(config, args)
+    elif command == "admintool":
+        admin_tool(config, args)
     else:
         print("invalid command, please read the doc")
 

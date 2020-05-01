@@ -1121,7 +1121,7 @@ def AddOrUpdateVC(user_name, quota_request):
     if AuthorizationManager.IsClusterAdmin(user_name):
         ret = dataHandler.AddOrUpdateVC(quota_request)
         if ret is not None:
-            for vc, row in ret.items()
+            for vc, row in ret.items():
                 cacheItem = {"vcName": vc, "resourceQuota": row["res_quota"],
                         "resourceMetadata": row["res_meta"]}
                 with vc_cache_lock:

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import logging
 from collections import Counter
 from cluster_resource import ClusterResource
 from ConfigUtils import merge_config
@@ -83,8 +84,8 @@ def categorize_quota_request_by_type(plan, meta):
     # count as "request", cpu request are those 
     # make sure no gpu sku is used to request cpu quota
     for sku, sku_spec in meta["gpu"].items():
-        per_node = sku_spec["per_node"]
-        gpu_type = sku_spec["gpu_type"]
+        per_node = sku_spec.get("per_node", 0)
+        gpu_type = sku_spec.get("gpu_type", None)
         if per_node == 0 and gpu_type is None:
             plan_gpu_quota.pop(sku, None)
         else:
@@ -92,29 +93,37 @@ def categorize_quota_request_by_type(plan, meta):
     return plan_gpu_quota, plan_cpu_quota
 
 
-def adequate_quota(plan, meta, worker_sku_cnt):
+def adequate_quota(plan, meta, worker_sku_cnt, logger=None):
     try:
         plan_gpu_quota, plan_cpu_quota = categorize_quota_request_by_type(
                                                         plan, meta)
         # check demand < total quota
         for r_type in ["gpu", "cpu"]:
-            plan_quota = eval(f"plan_{r_type}_quota")
+            plan_quota = eval("plan_{}_quota".format(r_type))
             for sku in plan_quota:
                 per_node = meta[r_type].get(sku, {}).get("per_node", 0)
                 sku_total = per_node * worker_sku_cnt.get(
                             sku, 0)
                 if plan_quota[sku] > sku_total:
-                    print(f"inadequate total quota of sku {sku}, "\
-                        f"{plan_quota[sku]}/{sku_total} desired")
+                    warn_info = "inadequate total quota of sku {}, "\
+                        "{}/{} desired".format(sku, plan_quota[sku],sku_total)
+                    if logger is None:
+                        print(warn_info)
+                    else:
+                        logger.warning(warn_info)
                     return False
         return True
     except:
-        print("Error happened. Please check quota plan, resourceMetadata"\
-            " and worker_sku_cnt")
+        err_info = "Error happened. Please check quota plan, "\
+                "resourceMetadata and worker_sku_cnt"
+        if logger is None:
+            print(err_info)
+        else:
+            logger.warning(err_info)
         return False
 
 
-def get_vc_row_by_gpu(quota_in_gpu, meta, worker_sku_cnt):
+def get_vc_row_by_gpu(quota_in_gpu, meta, worker_sku_cnt, logger=None):
     """should not discount here, since the number in quota_in_gpu 
         might have already been discounted"""
     try:
@@ -135,12 +144,16 @@ def get_vc_row_by_gpu(quota_in_gpu, meta, worker_sku_cnt):
             merge_config(res_quota, sku_dict)
         return old_quota, old_meta, res_quota
     except:
-        print("Error happened. Please check gpu quota request, "\
-            "resourceMetadata and worker_sku_cnt")
+        err_info = "Error happened. Please check gpu quota request, "\
+                "resourceMetadata and worker_sku_cnt"
+        if logger is None:
+            print(err_info)
+        else:
+            logger.warning(err_info)
         return False
 
 
-def get_vc_row_by_cpu(quota_in_cpu, meta, worker_sku_cnt):
+def get_vc_row_by_cpu(quota_in_cpu, meta, worker_sku_cnt, logger=None):
     """should not discount here, since the number in quota_in_gpu 
         might have already been discounted"""
     try:
@@ -156,12 +169,16 @@ def get_vc_row_by_cpu(quota_in_cpu, meta, worker_sku_cnt):
             merge_config(res_quota, sku_dict)
         return res_quota
     except:
-        print("Error happened. Please check gpu quota request, "\
-            "resourceMetadata and worker_sku_cnt")
+        err_info = "Error happened. Please check gpu quota request, "\
+                "resourceMetadata and worker_sku_cnt"
+        if logger is None:
+            print(err_info)
+        else:
+            logger.warning(err_info)
         return False
 
 
-def compute_all_resource_by_gpu_or_cpu(plan, meta, worker_sku_cnt):
+def get_vc_to_row_by_gpu_or_cpu(plan, meta, worker_sku_cnt, logger=None):
     """
     compute all resource based on input gpu or cpu count, e.g.
     {"gpu": {"Standard_ND40rs_v2": 32}, "cpu": {"Standard_B2s": 160}}
@@ -175,8 +192,9 @@ def compute_all_resource_by_gpu_or_cpu(plan, meta, worker_sku_cnt):
         cpu_req = {sku: amount for sku, amount in quota_req.get(
                     "cpu", {}).items() if sku in plan_cpu_quota}
         old_quota, old_meta, res_gpu_quota = get_vc_row_by_gpu(
-                                gpu_req, meta, worker_sku_cnt)
-        res_cpu_quota = get_vc_row_by_cpu(cpu_req, meta, worker_sku_cnt)
+                            gpu_req, meta, worker_sku_cnt, logger)
+        res_cpu_quota = get_vc_row_by_cpu(
+                            cpu_req, meta, worker_sku_cnt, logger)
         merge_config(res_gpu_quota, res_cpu_quota)
         vc_row = {"quota": json.dumps(old_quota), "meta": json.dumps(old_meta), 
           "res_quota": json.dumps(res_gpu_quota), "res_meta": json.dumps(meta)}

@@ -9,7 +9,7 @@ import timeit
 import mysql.connector
 from prometheus_client import Histogram
 from vc_quota import vc_value_str
-from vc_quota import adequate_quota, compute_all_resource_by_gpu_or_cpu
+from vc_quota import adequate_quota, get_vc_to_row_by_gpu_or_cpu
 
 from config import config, global_vars
 
@@ -380,16 +380,24 @@ class DataHandler(object):
             return False
 
     
-    def validate_quota_plan(self, quota_request, meta_dict, worker_sku_cnt):
-        all_quota_sql = f"SELECT vcName, resourceQuota FROM {self.vctablename}"
+    def validate_quota_plan(self, quota_request, meta_dict, worker_sku_cnt, logger=None):
+        logger.info("entered validate_quota_plan")
+        all_quota_sql = "SELECT vcName, resourceQuota FROM {}".format(self.vctablename)
+        logger.info("sql:\n{}".format(all_quota_sql))
         cursor = self.conn.cursor()
         cursor.execute(all_quota_sql)
         quota_res = cursor.fetchall()
-        all_vc_quotas = {json.loads(vc): json.loads(quota) for vc, quota in quota_res}
+        cursor.close()
+        logger.info("quota_res fetched")
+        all_vc_quotas = {vc: json.loads(quota) for vc, quota in quota_res}
         for vc, q_req in quota_request.items():
             all_vc_quotas[vc] = q_req
-        valid = adequate_quota(all_vc_quotas, meta_dict, worker_sku_cnt)
-        return valid
+        logger.info("got updated quota")
+        valid = adequate_quota(all_vc_quotas, meta_dict, worker_sku_cnt, logger)
+        if not valid and logger is not None:
+            logger.warning("ad-hoc quota plan (existing quota included):\n{}".format(
+                json.dumps(all_vc_quotas)))
+        return valid, all_vc_quotas
 
     
     @record
@@ -397,25 +405,38 @@ class DataHandler(object):
         '''quota_request: dict that map vc name to requested quota'''
         try:
             worker_sku_cnt = config["worker_sku_cnt"]
-            meta_sql = f"SELECT resourceQuota FROM {self.vctablename}"
+            meta_sql = "SELECT resourceMetadata FROM {}".format(self.vctablename)
             cursor = self.conn.cursor()
             cursor.execute(meta_sql)
-            meta_res = cursor.fetchone()
+            # TODO what if resourceMetadate in different rows differ?
+            # if want to use fetchone here, need buffered cursor
+            meta_res = cursor.fetchall()
+            cursor.close()
             meta_dict = json.loads(meta_res[0])
-            valid = self.validate_quota_plan(quota_request, meta_dict, worker_sku_cnt)
+            logger.info("meta loaded")
+            valid, all_vc_quotas = self.validate_quota_plan(
+                        quota_request, meta_dict, worker_sku_cnt, logger)
             if not valid:
-                logger.warning('Failed to Add or Update VCs\' Quota: would "\
-                    "exceed total resource amount.')
+                logger.warning("Failed to Add or Update VCs\' Quota: "\
+                "would exceed total resource amount. requested quota:\n"\
+                "{}, \nmeta:\n {} \nworker_sku_cnt:\n{}".format(
+                    json.dumps(quota_request), json.dumps(meta_dict), 
+                    json.dumps(worker_sku_cnt)))
                 return None
-            res = compute_all_resource_by_gpu_or_cpu(all_vc_quotas, meta_dict, worker_sku_cnt)
+            logger.info("request valid, processing")
+            res = get_vc_to_row_by_gpu_or_cpu(
+                all_vc_quotas, meta_dict, worker_sku_cnt, logger)
+            logger.info("row computed")
+            cursor = self.conn.cursor()
             for vc, row in res.items():
                 quota, metadata = row["quota"], row["meta"]
                 res_quota, res_meta = row["res_quota"], row["res_meta"]
                 sql = "INSERT INTO `{}` (vcName, quota, metadata, resourceQuota,"\
                 " resourceMetadata) VALUES ('{}', '{}', '{}', '{}', '{}') ON "\
                 "DUPLICATE KEY UPDATE resourceQuota = '{}', resourceMetadata = "\
-                "'{}'".format(self.vctablename, vcName, quota, metadata, \
+                "'{}'".format(self.vctablename, vc, quota, metadata,
                     res_quota, res_meta, res_quota, res_meta)
+                logger.info("Executing {}".format(sql))
                 cursor.execute(sql)
             self.conn.commit()
             cursor.close()
